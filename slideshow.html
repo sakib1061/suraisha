@@ -1,0 +1,2035 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Google Drive Live Photo Slideshow</title>
+  <style>
+    /* ==========================================================================
+       CSS Reset & Dark Modern Glassmorphism Styling
+       ========================================================================== */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    :root {
+      --bg-base: #06080d;
+      --bg-surface: rgba(15, 23, 42, 0.72);
+      --bg-surface-elevated: rgba(30, 41, 59, 0.85);
+      --border-glass: rgba(255, 255, 255, 0.12);
+      --border-glass-bright: rgba(255, 255, 255, 0.28);
+      --accent-primary: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.45);
+      --accent-purple: #a855f7;
+      --accent-success: #34d399;
+      --accent-danger: #f87171;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-sub: #64748b;
+      --blur-strength: blur(20px) saturate(180%);
+      --shadow-glass: 0 16px 40px -10px rgba(0, 0, 0, 0.8);
+      --shadow-ambient: 0 4px 20px 0 rgba(0, 0, 0, 0.45);
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --radius-full: 9999px;
+      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --transition-ui: 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-family);
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* Main Container */
+    #slideshow-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background-color: #020306;
+    }
+
+    /* Ambient dynamic blurred backlight */
+    .ambient-backdrop {
+      position: absolute;
+      inset: -15%;
+      background-position: center;
+      background-size: cover;
+      filter: blur(80px) brightness(0.35) saturate(140%);
+      transform: scale(1.15);
+      transition: background-image 0.75s ease-in-out, opacity 0.75s ease;
+      opacity: 0.85;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    /* Visual Stage */
+    .viewport {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+    }
+
+    /* Dual Layers for smooth cross-fade & sliding transitions */
+    .slide-layer {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transform: scale(1.02);
+      transition: opacity 0.65s cubic-bezier(0.4, 0, 0.2, 1), transform 0.65s cubic-bezier(0.4, 0, 0.2, 1);
+      pointer-events: none;
+      will-change: opacity, transform;
+    }
+
+    .slide-layer.active {
+      opacity: 1;
+      transform: scale(1);
+      pointer-events: auto;
+    }
+
+    .slide-layer.slide-left-out {
+      opacity: 0;
+      transform: translateX(-40px) scale(0.98);
+    }
+
+    .slide-layer.slide-right-out {
+      opacity: 0;
+      transform: translateX(40px) scale(0.98);
+    }
+
+    .slide-img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.75);
+      border-radius: 4px;
+      transition: object-fit 0.3s ease;
+    }
+
+    .cover-mode .slide-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 0;
+    }
+
+    /* Loader Spinner */
+    .loader-spinner {
+      position: absolute;
+      width: 48px;
+      height: 48px;
+      border: 3px solid rgba(255, 255, 255, 0.12);
+      border-top-color: var(--accent-primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      z-index: 3;
+      display: none;
+    }
+
+    .loader-spinner.show {
+      display: block;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* UI Overlay General */
+    .ui-overlay {
+      position: absolute;
+      z-index: 10;
+      transition: opacity 0.35s ease, transform 0.35s ease;
+    }
+
+    /* Auto-hide controls when idle */
+    .idle-hide .ui-overlay {
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+
+    /* TOP BAR */
+    .top-bar {
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: env(safe-area-inset-top, 16px) 24px 16px 24px;
+      background: linear-gradient(180deg, rgba(6, 8, 13, 0.9) 0%, rgba(6, 8, 13, 0) 100%);
+      pointer-events: none;
+    }
+
+    .top-bar > * {
+      pointer-events: auto;
+    }
+
+    .brand-cluster {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--bg-surface);
+      backdrop-filter: var(--blur-strength);
+      -webkit-backdrop-filter: var(--blur-strength);
+      border: 1px solid var(--border-glass);
+      padding: 8px 16px;
+      border-radius: var(--radius-full);
+      box-shadow: var(--shadow-ambient);
+    }
+
+    .live-pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--accent-success);
+      box-shadow: 0 0 10px var(--accent-success);
+      animation: pulseLive 2s infinite ease-in-out;
+    }
+
+    @keyframes pulseLive {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(1.3); }
+    }
+
+    .brand-title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      color: var(--text-main);
+    }
+
+    .badge-indicator {
+      background: rgba(255, 255, 255, 0.08);
+      padding: 3px 10px;
+      border-radius: var(--radius-full);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--accent-primary);
+    }
+
+    .random-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(56, 189, 248, 0.2));
+      border: 1px solid rgba(168, 85, 247, 0.4);
+      padding: 3px 10px;
+      border-radius: var(--radius-full);
+      font-size: 11.5px;
+      font-weight: 600;
+      color: #d8b4fe;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .random-badge:hover {
+      background: linear-gradient(135deg, rgba(168, 85, 247, 0.35), rgba(56, 189, 248, 0.35));
+      border-color: rgba(168, 85, 247, 0.7);
+    }
+
+    .random-badge.off {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: var(--border-glass);
+      color: var(--text-sub);
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Glass Buttons */
+    .glass-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 42px;
+      padding: 0 16px;
+      background: var(--bg-surface);
+      backdrop-filter: var(--blur-strength);
+      -webkit-backdrop-filter: var(--blur-strength);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-full);
+      color: var(--text-main);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      box-shadow: var(--shadow-ambient);
+      transition: all var(--transition-ui);
+    }
+
+    .glass-btn:hover {
+      background: var(--bg-surface-elevated);
+      border-color: var(--border-glass-bright);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+    }
+
+    .glass-btn:active {
+      transform: scale(0.96);
+    }
+
+    .glass-btn.icon-only {
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      border-radius: 50%;
+    }
+
+    .glass-btn.accent {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(168, 85, 247, 0.25));
+      border-color: rgba(56, 189, 248, 0.45);
+      color: #38bdf8;
+    }
+
+    .glass-btn.accent:hover {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.4), rgba(168, 85, 247, 0.4));
+      border-color: rgba(56, 189, 248, 0.7);
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    /* SIDE NAVIGATION ARROWS */
+    .nav-arrow {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 54px;
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: rgba(15, 23, 42, 0.55);
+      backdrop-filter: var(--blur-strength);
+      -webkit-backdrop-filter: var(--blur-strength);
+      border: 1px solid var(--border-glass);
+      color: var(--text-main);
+      cursor: pointer;
+      transition: all var(--transition-ui);
+      z-index: 10;
+      box-shadow: var(--shadow-ambient);
+    }
+
+    .nav-arrow:hover {
+      background: rgba(30, 41, 59, 0.88);
+      border-color: var(--border-glass-bright);
+      transform: translateY(-50%) scale(1.08);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    }
+
+    .nav-arrow:active {
+      transform: translateY(-50%) scale(0.94);
+    }
+
+    .nav-arrow.prev { left: 24px; }
+    .nav-arrow.next { right: 24px; }
+
+    /* BOTTOM CONTROLS */
+    .bottom-bar {
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      z-index: 10;
+      width: calc(100% - 48px);
+      max-width: 720px;
+      pointer-events: none;
+    }
+
+    .bottom-bar > * {
+      pointer-events: auto;
+    }
+
+    .control-deck {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 10px 18px;
+      background: var(--bg-surface);
+      backdrop-filter: var(--blur-strength);
+      -webkit-backdrop-filter: var(--blur-strength);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-full);
+      box-shadow: var(--shadow-glass);
+    }
+
+    .divider {
+      width: 1px;
+      height: 24px;
+      background: rgba(255, 255, 255, 0.12);
+      margin: 0 4px;
+    }
+
+    /* Play/Pause Button */
+    .play-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      border: none;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 18px rgba(2, 132, 199, 0.5);
+      transition: all var(--transition-ui);
+    }
+
+    .play-btn:hover {
+      transform: scale(1.08);
+      box-shadow: 0 6px 24px rgba(56, 189, 248, 0.65);
+    }
+
+    .play-btn:active {
+      transform: scale(0.92);
+    }
+
+    .play-btn.paused {
+      background: linear-gradient(135deg, #334155, #475569);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Random Order Toggle Button */
+    .shuffle-toggle-btn {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      height: 42px;
+      padding: 0 14px;
+      background: rgba(168, 85, 247, 0.18);
+      border: 1px solid rgba(168, 85, 247, 0.4);
+      color: #c084fc;
+      border-radius: var(--radius-full);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition-ui);
+    }
+
+    .shuffle-toggle-btn:hover {
+      background: rgba(168, 85, 247, 0.28);
+      border-color: rgba(168, 85, 247, 0.65);
+      transform: translateY(-1px);
+    }
+
+    .shuffle-toggle-btn.inactive {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: var(--border-glass);
+      color: var(--text-muted);
+    }
+
+    /* Interval selector */
+    .glass-select-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .glass-select {
+      appearance: none;
+      -webkit-appearance: none;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-full);
+      color: var(--text-main);
+      padding: 8px 30px 8px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      outline: none;
+      transition: all var(--transition-ui);
+    }
+
+    .glass-select:hover, .glass-select:focus {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: var(--border-glass-bright);
+    }
+
+    .select-arrow {
+      position: absolute;
+      right: 12px;
+      pointer-events: none;
+      width: 12px;
+      height: 12px;
+      fill: var(--text-muted);
+    }
+
+    /* Live Countdown Progress Bar */
+    .countdown-bar-wrap {
+      width: 100%;
+      max-width: 520px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      overflow: hidden;
+      backdrop-filter: blur(4px);
+    }
+
+    .countdown-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #38bdf8, #a855f7);
+      border-radius: 2px;
+      transition: width 0.1s linear;
+    }
+
+    /* Thumbnail Ribbon */
+    .thumb-strip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: rgba(10, 15, 28, 0.65);
+      backdrop-filter: var(--blur-strength);
+      -webkit-backdrop-filter: var(--blur-strength);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-md);
+      overflow-x: auto;
+      max-width: 90vw;
+      scrollbar-width: none;
+    }
+
+    .thumb-strip::-webkit-scrollbar {
+      display: none;
+    }
+
+    .thumb-item {
+      width: 44px;
+      height: 32px;
+      border-radius: 6px;
+      object-fit: cover;
+      cursor: pointer;
+      opacity: 0.45;
+      border: 1.5px solid transparent;
+      transition: all 0.2s ease;
+      flex-shrink: 0;
+    }
+
+    .thumb-item:hover {
+      opacity: 0.8;
+      transform: translateY(-2px);
+    }
+
+    .thumb-item.active {
+      opacity: 1;
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 12px var(--accent-glow);
+      transform: scale(1.08);
+    }
+
+    /* ==========================================================================
+       MODAL: Google Drive Folder & Link Importer
+       ========================================================================== */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 17, 0.85);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .modal-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-card {
+      width: 100%;
+      max-width: 660px;
+      max-height: 90vh;
+      background: rgba(17, 24, 39, 0.96);
+      border: 1px solid var(--border-glass-bright);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-glass);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transform: scale(0.96) translateY(10px);
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .modal-backdrop.open .modal-card {
+      transform: scale(1) translateY(0);
+    }
+
+    .modal-header {
+      padding: 18px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-glass);
+    }
+
+    .modal-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .modal-body {
+      padding: 20px 24px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* Tabs in Modal */
+    .modal-tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--border-glass);
+      padding-bottom: 12px;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      padding: 8px 16px;
+      border-radius: var(--radius-full);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .tab-btn:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .tab-btn.active {
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.12);
+      border-color: rgba(56, 189, 248, 0.35);
+    }
+
+    .tab-panel {
+      display: none;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .tab-panel.active {
+      display: flex;
+    }
+
+    .info-badge {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 16px;
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: var(--radius-md);
+      font-size: 12.5px;
+      line-height: 1.5;
+      color: #bae6fd;
+    }
+
+    .input-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      display: block;
+    }
+
+    .glass-input {
+      width: 100%;
+      background: rgba(10, 15, 28, 0.7);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-md);
+      color: var(--text-main);
+      padding: 10px 14px;
+      font-size: 13.5px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+
+    .glass-input:focus, .glass-textarea:focus {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+    }
+
+    .glass-textarea {
+      width: 100%;
+      min-height: 110px;
+      background: rgba(10, 15, 28, 0.7);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-md);
+      color: var(--text-main);
+      padding: 12px 14px;
+      font-size: 13px;
+      font-family: inherit;
+      line-height: 1.5;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+
+    .folder-fetch-box {
+      display: flex;
+      gap: 8px;
+    }
+
+    .folder-fetch-box .glass-input {
+      flex: 1;
+    }
+
+    .presets-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .preset-chip {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-full);
+      padding: 6px 12px;
+      font-size: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .preset-chip:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: var(--text-main);
+      border-color: var(--border-glass-bright);
+    }
+
+    .items-list-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 4px;
+    }
+
+    .items-count {
+      font-size: 13px;
+      color: var(--text-sub);
+    }
+
+    .photos-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 160px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .photo-row-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+    }
+
+    .photo-row-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    .photo-row-thumb {
+      width: 36px;
+      height: 28px;
+      border-radius: 4px;
+      object-fit: cover;
+      flex-shrink: 0;
+      background: #1e293b;
+    }
+
+    .photo-row-url {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 340px;
+      color: var(--text-muted);
+    }
+
+    .delete-item-btn {
+      background: none;
+      border: none;
+      color: var(--text-sub);
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+      transition: color 0.2s;
+    }
+
+    .delete-item-btn:hover {
+      color: var(--accent-danger);
+    }
+
+    .modal-footer {
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+      border-top: 1px solid var(--border-glass);
+      background: rgba(10, 15, 28, 0.45);
+    }
+
+    /* Toast Notification */
+    .toast-banner {
+      position: fixed;
+      top: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-100px);
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid var(--border-glass-bright);
+      backdrop-filter: var(--blur-strength);
+      -webkit-backdrop-filter: var(--blur-strength);
+      border-radius: var(--radius-full);
+      padding: 10px 22px;
+      box-shadow: var(--shadow-glass);
+      color: var(--text-main);
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 200;
+      opacity: 0;
+      transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .toast-banner.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    @media (max-width: 640px) {
+      .top-bar {
+        padding: 12px 14px;
+      }
+      .brand-title {
+        display: none;
+      }
+      .nav-arrow {
+        width: 44px;
+        height: 44px;
+      }
+      .nav-arrow.prev { left: 10px; }
+      .nav-arrow.next { right: 10px; }
+      .bottom-bar {
+        bottom: 14px;
+        width: calc(100% - 20px);
+      }
+      .control-deck {
+        padding: 8px 12px;
+        gap: 6px;
+      }
+      .glass-btn {
+        padding: 0 12px;
+        height: 38px;
+        font-size: 12px;
+      }
+      .play-btn {
+        width: 42px;
+        height: 42px;
+      }
+      .thumb-strip {
+        max-width: 95vw;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Main Slideshow Stage -->
+  <div id="slideshow-container">
+    
+    <!-- Dynamic Ambient Backlight (Mirrors Current Image) -->
+    <div id="ambientBackdrop" class="ambient-backdrop"></div>
+
+    <!-- Centered Viewport with Dual Layer Animation -->
+    <div class="viewport" id="viewport">
+      <div id="slideLayerA" class="slide-layer active">
+        <img id="slideImgA" class="slide-img" alt="Slideshow photo" />
+      </div>
+      <div id="slideLayerB" class="slide-layer">
+        <img id="slideImgB" class="slide-img" alt="Slideshow photo" />
+      </div>
+      <div id="spinner" class="loader-spinner"></div>
+    </div>
+
+    <!-- TOP BAR -->
+    <header class="top-bar ui-overlay">
+      <div class="brand-cluster">
+        <div class="live-pulse" title="Live Slideshow Active"></div>
+        <span class="brand-title">Google Drive Slideshow</span>
+        <span id="photoIndexBadge" class="badge-indicator">Photo 1 of 8</span>
+        <!-- Random Order Badge / Switch -->
+        <div id="randomStatusBadge" class="random-badge" title="Click to toggle Random/Sequential order">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 3 21 3 21 8"/>
+            <line x1="4" y1="20" x2="21" y2="3"/>
+            <polyline points="21 16 21 21 16 21"/>
+            <line x1="15" y1="15" x2="21" y2="21"/>
+            <line x1="4" y1="4" x2="9" y2="9"/>
+          </svg>
+          <span id="randomBadgeText">Random: ON</span>
+        </div>
+      </div>
+
+      <div class="top-actions">
+        <!-- Re-Shuffle Button -->
+        <button id="reShuffleBtn" class="glass-btn icon-only" title="Re-Shuffle photos in new random order" aria-label="Re-Shuffle">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+        </button>
+
+        <!-- Contain / Cover Aspect Ratio Toggle -->
+        <button id="fitModeBtn" class="glass-btn icon-only" title="Toggle Fit/Fill Aspect Ratio" aria-label="Toggle Fit Mode">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+          </svg>
+        </button>
+
+        <!-- Import / Manage Google Drive Folder & Links -->
+        <button id="openModalBtn" class="glass-btn accent" title="Import Google Drive Folder or Links">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>Drive Folder / Links</span>
+        </button>
+
+        <!-- True Fullscreen Button -->
+        <button id="fullscreenBtn" class="glass-btn icon-only" title="Toggle Fullscreen" aria-label="Fullscreen">
+          <svg id="fsIconExpand" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 3 21 3 21 9"/>
+            <polyline points="9 21 3 21 3 15"/>
+            <line x1="21" y1="3" x2="14" y2="10"/>
+            <line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+          <svg id="fsIconCompress" style="display:none;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 14 10 14 10 20"/>
+            <polyline points="20 10 14 10 14 4"/>
+            <line x1="14" y1="10" x2="21" y2="3"/>
+            <line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- SIDE NAVIGATION ARROWS -->
+    <button id="prevArrow" class="nav-arrow prev ui-overlay" aria-label="Previous photo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"/>
+      </svg>
+    </button>
+    <button id="nextArrow" class="nav-arrow next ui-overlay" aria-label="Next photo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="9 18 15 12 9 6"/>
+      </svg>
+    </button>
+
+    <!-- BOTTOM FLOATING CONTROLLER -->
+    <div class="bottom-bar ui-overlay">
+      <!-- Live Countdown Progress Bar -->
+      <div class="countdown-bar-wrap">
+        <div id="countdownBar" class="countdown-bar"></div>
+      </div>
+
+      <!-- Controls Deck -->
+      <div class="control-deck">
+        <!-- Prev Button (<) -->
+        <button id="prevBtn" class="glass-btn icon-only" title="Previous photo (<)" aria-label="Previous">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </button>
+
+        <!-- Play/Pause Button -->
+        <button id="playPauseBtn" class="play-btn" title="Toggle Auto-Play (Space)" aria-label="Play or Pause">
+          <svg id="pauseIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="4" width="4" height="16" rx="1"/>
+            <rect x="14" y="4" width="4" height="16" rx="1"/>
+          </svg>
+          <svg id="playIcon" style="display:none; margin-left: 2px;" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+        </button>
+
+        <!-- Next Button (>) -->
+        <button id="nextBtn" class="glass-btn icon-only" title="Next photo (>)" aria-label="Next">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        </button>
+
+        <div class="divider"></div>
+
+        <!-- Interval Timer Dropdown (3s, 5s, 10s) -->
+        <div class="glass-select-wrapper" title="Slide transition duration">
+          <select id="timerSelect" class="glass-select" aria-label="Slide duration">
+            <option value="3000">3 Seconds</option>
+            <option value="5000" selected>5 Seconds</option>
+            <option value="10000">10 Seconds</option>
+          </select>
+          <svg class="select-arrow" viewBox="0 0 24 24">
+            <path d="M7 10l5 5 5-5z"/>
+          </svg>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Random Order Toggle in Deck -->
+        <button id="deckShuffleBtn" class="shuffle-toggle-btn" title="Toggle Random Order">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 3 21 3 21 8"/>
+            <line x1="4" y1="20" x2="21" y2="3"/>
+            <polyline points="21 16 21 21 16 21"/>
+            <line x1="15" y1="15" x2="21" y2="21"/>
+            <line x1="4" y1="4" x2="9" y2="9"/>
+          </svg>
+          <span id="deckShuffleText">Random</span>
+        </button>
+      </div>
+
+      <!-- Quick Thumbnail Ribbon -->
+      <div id="thumbStrip" class="thumb-strip"></div>
+    </div>
+
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toast" class="toast-banner">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="12" y1="16" x2="12" y2="12"/>
+      <line x1="12" y1="8" x2="12.01" y2="8"/>
+    </svg>
+    <span id="toastMsg">Ready</span>
+  </div>
+
+  <!-- MODAL: GOOGLE DRIVE FOLDER & LINKS IMPORT -->
+  <div id="linksModal" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>Google Drive Folder & Photo Importer</span>
+        </div>
+        <button id="closeModalBtn" class="glass-btn icon-only" aria-label="Close modal">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Tabs -->
+        <div class="modal-tabs">
+          <button id="tabFolderBtn" class="tab-btn active" data-tab="tabFolder">📁 Google Drive Folder</button>
+          <button id="tabLinksBtn" class="tab-btn" data-tab="tabLinks">🔗 Paste File Links / IDs</button>
+          <button id="tabPresetsBtn" class="tab-btn" data-tab="tabPresets">✨ Presets & Demos</button>
+        </div>
+
+        <!-- TAB 1: GOOGLE DRIVE FOLDER -->
+        <div id="tabFolder" class="tab-panel active">
+          <div class="info-badge">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <div>
+              <strong>Public Google Drive Folder:</strong> Paste your folder link (e.g., <code>drive.google.com/drive/folders/FOLDER_ID</code>). The app fetches image IDs from the folder, converts them to high-speed viewable URLs (<code>lh3.googleusercontent.com/d/ID</code>), and plays them in <strong>Random Order</strong>.
+            </div>
+          </div>
+
+          <div>
+            <label class="input-label" for="folderUrlInput">Google Drive Public Folder Link or Folder ID:</label>
+            <div class="folder-fetch-box">
+              <input id="folderUrlInput" type="text" class="glass-input" placeholder="https://drive.google.com/drive/folders/1aBcDeFgHiJk..." />
+              <button id="fetchFolderBtn" class="glass-btn accent">
+                <span id="fetchBtnSpinner" class="loader-spinner" style="width:16px; height:16px; border-width:2px; margin-right:4px;"></span>
+                <span id="fetchBtnText">Load Folder</span>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label class="input-label" for="apiKeyInput">Google Drive API Key (Optional — for private/unrestricted API quotas):</label>
+            <input id="apiKeyInput" type="password" class="glass-input" placeholder="Optional: AIzaSy..." />
+            <small style="color:var(--text-sub); display:block; margin-top:4px; font-size:11px;">If left blank, the app uses public scraping & web proxy to extract folder image IDs automatically.</small>
+          </div>
+        </div>
+
+        <!-- TAB 2: PASTE LINKS / IDS -->
+        <div id="tabLinks" class="tab-panel">
+          <div>
+            <label class="input-label" for="urlInput">Paste Google Drive Image Links or Direct URLs (comma or newline separated):</label>
+            <textarea id="urlInput" class="glass-textarea" placeholder="https://drive.google.com/file/d/1XyZ.../view&#10;https://drive.google.com/open?id=1AbC...&#10;1AbCdEfGhIjKlMnOpQrStUvWxYz...&#10;https://images.unsplash.com/photo-..."></textarea>
+            <small style="color:var(--text-sub); display:block; margin-top:4px; font-size:11px;">Tip: You can select multiple photos in Google Drive, click 'Copy links', and paste them here directly!</small>
+          </div>
+        </div>
+
+        <!-- TAB 3: PRESETS -->
+        <div id="tabPresets" class="tab-panel">
+          <label class="input-label">Select a curated photography collection:</label>
+          <div class="presets-row">
+            <button class="preset-chip" data-preset="nature">🌿 Alpine Landscapes</button>
+            <button class="preset-chip" data-preset="architecture">🏛️ Modern Architecture</button>
+            <button class="preset-chip" data-preset="neon">🌌 Cyberpunk & Space</button>
+            <button class="preset-chip" data-preset="minimal">⚪ Minimalist Aesthetics</button>
+          </div>
+        </div>
+
+        <!-- Current items in slideshow -->
+        <div class="items-list-header">
+          <label class="input-label" style="margin-bottom:0;">Current Slideshow Queue</label>
+          <span id="queueCount" class="items-count">8 photos</span>
+        </div>
+        <div id="queueList" class="photos-list"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="clearAllBtn" class="glass-btn" style="color:var(--accent-danger); margin-right:auto;">Clear Queue</button>
+        <button id="cancelModalBtn" class="glass-btn">Cancel</button>
+        <button id="importUrlsBtn" class="glass-btn accent">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span>Apply & Randomize</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       VANILLA JAVASCRIPT: URL & Folder Parser, Randomizer, Transitions, Gestures
+       ========================================================================== -->
+  <script>
+    (function () {
+      'use strict';
+
+      /* --------------------------------------------------------------------------
+         Curated Presets
+         -------------------------------------------------------------------------- */
+      const PRESETS = {
+        nature: [
+          'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1426604966848-d7adac402bff?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1472214103451-9374bd1c798e?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?auto=format&fit=crop&w=1920&q=80'
+        ],
+        architecture: [
+          'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1518780664697-55e3ad937233?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1493397212122-2b85dda8106b?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=1920&q=80'
+        ],
+        neon: [
+          'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1519501025264-65ba15a82390?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1545486332-9e0999c535b2?auto=format&fit=crop&w=1920&q=80'
+        ],
+        minimal: [
+          'https://images.unsplash.com/photo-1494438639946-1ebd1d20bf85?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1920&q=80',
+          'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1920&q=80'
+        ]
+      };
+
+      /* --------------------------------------------------------------------------
+         APPLICATION STATE
+         -------------------------------------------------------------------------- */
+      let masterPhotoList = [
+        'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1920&q=80',
+        'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1920&q=80',
+        'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1920&q=80',
+        'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1920&q=80',
+        'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=1920&q=80',
+        'https://images.unsplash.com/photo-1519501025264-65ba15a82390?auto=format&fit=crop&w=1920&q=80',
+        'https://images.unsplash.com/photo-1494438639946-1ebd1d20bf85?auto=format&fit=crop&w=1920&q=80',
+        'https://images.unsplash.com/photo-1472214103451-9374bd1c798e?auto=format&fit=crop&w=1920&q=80'
+      ];
+
+      // Active playback queue (shuffled when isRandomOrder = true)
+      let photoList = [...masterPhotoList];
+      let currentIndex = 0;
+      let isPlaying = true;
+      let isRandomOrder = true; // Random order by default as requested!
+      let slideInterval = 5000;
+      let progressTimer = null;
+      let progressStartTime = 0;
+      let isCoverMode = false;
+      let activeLayer = 'A';
+      let idleTimer = null;
+      const preloadedCache = new Set();
+
+      /* --------------------------------------------------------------------------
+         DOM Element References
+         -------------------------------------------------------------------------- */
+      const container = document.getElementById('slideshow-container');
+      const ambientBackdrop = document.getElementById('ambientBackdrop');
+      const slideLayerA = document.getElementById('slideLayerA');
+      const slideImgA = document.getElementById('slideImgA');
+      const slideLayerB = document.getElementById('slideLayerB');
+      const slideImgB = document.getElementById('slideImgB');
+      const spinner = document.getElementById('spinner');
+
+      const photoIndexBadge = document.getElementById('photoIndexBadge');
+      const randomStatusBadge = document.getElementById('randomStatusBadge');
+      const randomBadgeText = document.getElementById('randomBadgeText');
+      const deckShuffleBtn = document.getElementById('deckShuffleBtn');
+      const deckShuffleText = document.getElementById('deckShuffleText');
+      const reShuffleBtn = document.getElementById('reShuffleBtn');
+
+      const countdownBar = document.getElementById('countdownBar');
+      const timerSelect = document.getElementById('timerSelect');
+
+      const playPauseBtn = document.getElementById('playPauseBtn');
+      const playIcon = document.getElementById('playIcon');
+      const pauseIcon = document.getElementById('pauseIcon');
+      const prevBtn = document.getElementById('prevBtn');
+      const nextBtn = document.getElementById('nextBtn');
+      const prevArrow = document.getElementById('prevArrow');
+      const nextArrow = document.getElementById('nextArrow');
+      const fitModeBtn = document.getElementById('fitModeBtn');
+      const fullscreenBtn = document.getElementById('fullscreenBtn');
+      const fsIconExpand = document.getElementById('fsIconExpand');
+      const fsIconCompress = document.getElementById('fsIconCompress');
+      const thumbStrip = document.getElementById('thumbStrip');
+
+      const linksModal = document.getElementById('linksModal');
+      const openModalBtn = document.getElementById('openModalBtn');
+      const closeModalBtn = document.getElementById('closeModalBtn');
+      const cancelModalBtn = document.getElementById('cancelModalBtn');
+      const importUrlsBtn = document.getElementById('importUrlsBtn');
+      const clearAllBtn = document.getElementById('clearAllBtn');
+      const urlInput = document.getElementById('urlInput');
+      const queueList = document.getElementById('queueList');
+      const queueCount = document.getElementById('queueCount');
+
+      const folderUrlInput = document.getElementById('folderUrlInput');
+      const apiKeyInput = document.getElementById('apiKeyInput');
+      const fetchFolderBtn = document.getElementById('fetchFolderBtn');
+      const fetchBtnSpinner = document.getElementById('fetchBtnSpinner');
+      const fetchBtnText = document.getElementById('fetchBtnText');
+
+      const toast = document.getElementById('toast');
+      const toastMsg = document.getElementById('toastMsg');
+
+      /* --------------------------------------------------------------------------
+         1. RANDOM ORDER (SHUFFLE) ALGORITHM
+         -------------------------------------------------------------------------- */
+      /**
+       * Pure Fisher-Yates shuffle array algorithm
+       */
+      function shuffleArray(arr) {
+        const copy = [...arr];
+        for (let i = copy.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
+      }
+
+      /**
+       * Applies or toggles random order across the current playlist
+       */
+      function applyRandomOrder(reshuffleOnly = false) {
+        if (photoList.length <= 1) return;
+
+        const currentPhoto = photoList[currentIndex];
+
+        if (isRandomOrder) {
+          photoList = shuffleArray(masterPhotoList);
+          // Place currently displayed photo at index 0 so playback continues seamlessly
+          const foundIdx = photoList.indexOf(currentPhoto);
+          if (foundIdx > -1) {
+            photoList.splice(foundIdx, 1);
+            photoList.unshift(currentPhoto);
+          }
+          currentIndex = 0;
+        } else if (!reshuffleOnly) {
+          // Sequential order matching master list
+          photoList = [...masterPhotoList];
+          const foundIdx = photoList.indexOf(currentPhoto);
+          currentIndex = foundIdx > -1 ? foundIdx : 0;
+        }
+
+        updateRandomUI();
+        renderThumbStrip();
+        photoIndexBadge.textContent = `Photo ${currentIndex + 1} of ${photoList.length}`;
+      }
+
+      function updateRandomUI() {
+        if (isRandomOrder) {
+          randomStatusBadge.classList.remove('off');
+          randomBadgeText.textContent = 'Random: ON';
+          deckShuffleBtn.classList.remove('inactive');
+          deckShuffleText.textContent = 'Random: ON';
+        } else {
+          randomStatusBadge.classList.add('off');
+          randomBadgeText.textContent = 'Random: OFF';
+          deckShuffleBtn.classList.add('inactive');
+          deckShuffleText.textContent = 'Sequential';
+        }
+      }
+
+      function toggleRandomOrder() {
+        isRandomOrder = !isRandomOrder;
+        applyRandomOrder(false);
+        showToast(isRandomOrder ? '🔀 Random Order: ENABLED' : '▶️ Sequential Order: ENABLED');
+      }
+
+      /* --------------------------------------------------------------------------
+         2. GOOGLE DRIVE URL & FOLDER PARSER
+         -------------------------------------------------------------------------- */
+      /**
+       * Extracts Google Drive folder ID from link or string
+       */
+      function extractFolderId(str) {
+        if (!str) return null;
+        str = str.trim();
+        // Matching: drive.google.com/drive/folders/FOLDER_ID or /folders/FOLDER_ID or ?id=FOLDER_ID
+        const folderMatch = str.match(/(?:folders\/|[?&]id=)([a-zA-Z0-9_-]{20,})/);
+        if (folderMatch && folderMatch[1]) {
+          return folderMatch[1];
+        }
+        // Raw ID
+        if (/^[a-zA-Z0-9_-]{24,45}$/.test(str)) {
+          return str;
+        }
+        return null;
+      }
+
+      /**
+       * Extracts single image ID or direct URL from Google Drive link
+       */
+      function parseImageUrl(rawString) {
+        if (!rawString) return null;
+        const str = rawString.trim();
+        if (!str) return null;
+
+        // 1. Google Drive /file/d/IMAGE_ID/
+        const dMatch = str.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/);
+        if (dMatch && dMatch[1]) {
+          return `https://lh3.googleusercontent.com/d/${dMatch[1]}`;
+        }
+
+        // 2. Google Drive /d/IMAGE_ID
+        const dShortMatch = str.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
+        if (dShortMatch && dShortMatch[1]) {
+          return `https://lh3.googleusercontent.com/d/${dShortMatch[1]}`;
+        }
+
+        // 3. Google Drive ?id=IMAGE_ID
+        const idMatch = str.match(/[?&]id=([a-zA-Z0-9_-]{20,})/);
+        if (idMatch && idMatch[1]) {
+          return `https://lh3.googleusercontent.com/d/${idMatch[1]}`;
+        }
+
+        // 4. Raw Google Drive file ID
+        if (/^[a-zA-Z0-9_-]{28,45}$/.test(str)) {
+          return `https://lh3.googleusercontent.com/d/${str}`;
+        }
+
+        // 5. Standard Web Image Link
+        if (/^https?:\/\/.+/i.test(str)) {
+          return str;
+        }
+
+        return null;
+      }
+
+      function parseBulkInput(text) {
+        if (!text) return [];
+        const lines = text.split(/[\r\n,]+/);
+        const resolved = [];
+        for (const line of lines) {
+          const parsed = parseImageUrl(line);
+          if (parsed && !resolved.includes(parsed)) {
+            resolved.push(parsed);
+          }
+        }
+        return resolved;
+      }
+
+      /* --------------------------------------------------------------------------
+         3. FETCH IMAGES FROM GOOGLE DRIVE FOLDER
+         -------------------------------------------------------------------------- */
+      async function fetchImagesFromGoogleDriveFolder(folderId, apiKey = '') {
+        const directImageUrls = [];
+
+        // Method A: If user provided Google Drive API Key
+        if (apiKey) {
+          try {
+            const query = encodeURIComponent(`'${folderId}' in parents and trashed = false and mimeType contains 'image/'`);
+            const apiUrl = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType)&pageSize=100&key=${apiKey}`;
+            const res = await fetch(apiUrl);
+            if (res.ok) {
+              const data = await res.json();
+              if (data.files && data.files.length > 0) {
+                data.files.forEach(file => {
+                  directImageUrls.push(`https://lh3.googleusercontent.com/d/${file.id}`);
+                });
+                return directImageUrls;
+              }
+            }
+          } catch (err) {
+            console.warn('Drive API fetch error:', err);
+          }
+        }
+
+        // Method B: Web scraper via CORS-friendly web proxies (parses file IDs from public folder HTML)
+        const proxies = [
+          `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://drive.google.com/drive/folders/${folderId}`)}`,
+          `https://corsproxy.io/?${encodeURIComponent(`https://drive.google.com/drive/folders/${folderId}`)}`
+        ];
+
+        for (const proxyUrl of proxies) {
+          try {
+            const res = await fetch(proxyUrl);
+            if (res.ok) {
+              const html = await res.text();
+              // Extract Google Drive file IDs from HTML payload
+              // Drive embeds folder item IDs in patterns: ["ID", ... or /file/d/ID or https://lh3.googleusercontent.com/d/ID
+              const idMatches = html.match(/\/file\/d\/([a-zA-Z0-9_-]{25,})/g) || [];
+              const rawMatches = html.match(/\["([a-zA-Z0-9_-]{28,40})"/g) || [];
+              
+              const foundIds = new Set();
+              
+              idMatches.forEach(m => {
+                const clean = m.replace('/file/d/', '');
+                if (clean && clean !== folderId) foundIds.add(clean);
+              });
+
+              rawMatches.forEach(m => {
+                const clean = m.replace('["', '').replace('"', '');
+                if (clean && clean !== folderId) foundIds.add(clean);
+              });
+
+              if (foundIds.size > 0) {
+                foundIds.forEach(id => {
+                  directImageUrls.push(`https://lh3.googleusercontent.com/d/${id}`);
+                });
+                return directImageUrls;
+              }
+            }
+          } catch (e) {
+            console.warn('Proxy fetch attempt failed:', e);
+          }
+        }
+
+        return directImageUrls;
+      }
+
+      /* --------------------------------------------------------------------------
+         4. IMAGE PRELOADER
+         -------------------------------------------------------------------------- */
+      function preloadImage(url) {
+        if (!url || preloadedCache.has(url)) return;
+        const img = new Image();
+        img.src = url;
+        img.onload = () => preloadedCache.add(url);
+      }
+
+      function preloadAdjacent() {
+        if (photoList.length <= 1) return;
+        const nextIdx = (currentIndex + 1) % photoList.length;
+        const prevIdx = (currentIndex - 1 + photoList.length) % photoList.length;
+        preloadImage(photoList[nextIdx]);
+        preloadImage(photoList[prevIdx]);
+      }
+
+      /* --------------------------------------------------------------------------
+         5. SLIDESHOW DISPLAY & TRANSITIONS
+         -------------------------------------------------------------------------- */
+      function showPhoto(index, direction = 'next') {
+        if (photoList.length === 0) {
+          photoIndexBadge.textContent = 'No photos';
+          slideImgA.src = '';
+          slideImgB.src = '';
+          ambientBackdrop.style.backgroundImage = 'none';
+          return;
+        }
+
+        currentIndex = ((index % photoList.length) + photoList.length) % photoList.length;
+        const url = photoList[currentIndex];
+
+        photoIndexBadge.textContent = `Photo ${currentIndex + 1} of ${photoList.length}`;
+        updateThumbStripActive();
+
+        const incomingLayer = activeLayer === 'A' ? slideLayerB : slideLayerA;
+        const outgoingLayer = activeLayer === 'A' ? slideLayerA : slideLayerB;
+        const incomingImg = activeLayer === 'A' ? slideImgB : slideImgA;
+
+        spinner.classList.add('show');
+
+        const tempImg = new Image();
+        tempImg.onload = function () {
+          spinner.classList.remove('show');
+          incomingImg.src = url;
+
+          ambientBackdrop.style.backgroundImage = `url("${url}")`;
+
+          incomingLayer.classList.remove('slide-left-out', 'slide-right-out');
+          outgoingLayer.classList.remove('slide-left-out', 'slide-right-out');
+
+          if (direction === 'next') {
+            outgoingLayer.classList.add('slide-left-out');
+          } else if (direction === 'prev') {
+            outgoingLayer.classList.add('slide-right-out');
+          }
+
+          outgoingLayer.classList.remove('active');
+          incomingLayer.classList.add('active');
+
+          activeLayer = activeLayer === 'A' ? 'B' : 'A';
+          preloadAdjacent();
+        };
+
+        tempImg.onerror = function () {
+          spinner.classList.remove('show');
+          showToast(`Image couldn't load. Verify Google Drive sharing permissions.`);
+          if (isPlaying) {
+            setTimeout(() => nextPhoto(), 2200);
+          }
+        };
+
+        tempImg.src = url;
+
+        if (isPlaying) {
+          resetAutoPlayProgress();
+        }
+      }
+
+      function nextPhoto() {
+        showPhoto(currentIndex + 1, 'next');
+      }
+
+      function prevPhoto() {
+        showPhoto(currentIndex - 1, 'prev');
+      }
+
+      /* --------------------------------------------------------------------------
+         6. AUTO-PLAY TIMERS
+         -------------------------------------------------------------------------- */
+      function startAutoPlay() {
+        isPlaying = true;
+        playIcon.style.display = 'none';
+        pauseIcon.style.display = 'block';
+        playPauseBtn.classList.remove('paused');
+        resetAutoPlayProgress();
+      }
+
+      function pauseAutoPlay() {
+        isPlaying = false;
+        playIcon.style.display = 'block';
+        pauseIcon.style.display = 'none';
+        playPauseBtn.classList.add('paused');
+        cancelAnimationFrame(progressTimer);
+        countdownBar.style.width = '0%';
+      }
+
+      function toggleAutoPlay() {
+        if (isPlaying) {
+          pauseAutoPlay();
+          showToast('Slideshow Paused');
+        } else {
+          startAutoPlay();
+          showToast(`Auto-Playing (${slideInterval / 1000}s)`);
+        }
+      }
+
+      function resetAutoPlayProgress() {
+        cancelAnimationFrame(progressTimer);
+        progressStartTime = performance.now();
+        countdownBar.style.width = '0%';
+
+        function tick(now) {
+          if (!isPlaying) return;
+          const elapsed = now - progressStartTime;
+          const pct = Math.min((elapsed / slideInterval) * 100, 100);
+          countdownBar.style.width = pct + '%';
+
+          if (elapsed >= slideInterval) {
+            countdownBar.style.width = '100%';
+            nextPhoto();
+          } else {
+            progressTimer = requestAnimationFrame(tick);
+          }
+        }
+
+        progressTimer = requestAnimationFrame(tick);
+      }
+
+      /* --------------------------------------------------------------------------
+         7. FULLSCREEN SUPPORT
+         -------------------------------------------------------------------------- */
+      function toggleFullscreen() {
+        const doc = window.document;
+        const docEl = container;
+
+        const requestFs = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.mozRequestFullScreen || docEl.msRequestFullscreen;
+        const cancelFs = doc.exitFullscreen || doc.webkitExitFullscreen || doc.mozCancelFullScreen || doc.msExitFullscreen;
+
+        const isFs = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
+
+        if (!isFs) {
+          if (requestFs) {
+            requestFs.call(docEl).catch(() => {
+              showToast('Fullscreen mode not available');
+            });
+          }
+        } else {
+          if (cancelFs) {
+            cancelFs.call(doc);
+          }
+        }
+      }
+
+      function updateFullscreenUI() {
+        const isFs = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
+        if (isFs) {
+          fsIconExpand.style.display = 'none';
+          fsIconCompress.style.display = 'block';
+        } else {
+          fsIconExpand.style.display = 'block';
+          fsIconCompress.style.display = 'none';
+        }
+      }
+
+      ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange'].forEach(evt => {
+        document.addEventListener(evt, updateFullscreenUI);
+      });
+
+      /* --------------------------------------------------------------------------
+         8. TOUCH / SWIPE GESTURES
+         -------------------------------------------------------------------------- */
+      let touchStartX = 0;
+      let touchStartY = 0;
+      let touchEndX = 0;
+      let touchEndY = 0;
+      const SWIPE_THRESHOLD = 45;
+      const MAX_OFF_AXIS = 75;
+
+      container.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+          touchStartX = e.touches[0].clientX;
+          touchStartY = e.touches[0].clientY;
+          touchEndX = touchStartX;
+          touchEndY = touchStartY;
+          wakeUI();
+        }
+      }, { passive: true });
+
+      container.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 1) {
+          touchEndX = e.touches[0].clientX;
+          touchEndY = e.touches[0].clientY;
+        }
+      }, { passive: true });
+
+      container.addEventListener('touchend', (e) => {
+        const diffX = touchEndX - touchStartX;
+        const diffY = touchEndY - touchStartY;
+
+        if (Math.abs(diffX) > SWIPE_THRESHOLD && Math.abs(diffY) < MAX_OFF_AXIS) {
+          if (diffX < 0) {
+            nextPhoto();
+            showToast('Next Photo');
+          } else {
+            prevPhoto();
+            showToast('Previous Photo');
+          }
+        }
+      }, { passive: true });
+
+      /* --------------------------------------------------------------------------
+         9. AUTO-HIDE CONTROLS ON IDLE
+         -------------------------------------------------------------------------- */
+      function wakeUI() {
+        container.classList.remove('idle-hide');
+        clearTimeout(idleTimer);
+        if (isPlaying) {
+          idleTimer = setTimeout(() => {
+            if (!linksModal.classList.contains('open')) {
+              container.classList.add('idle-hide');
+            }
+          }, 3500);
+        }
+      }
+
+      ['mousemove', 'mousedown', 'keydown', 'touchstart'].forEach(evt => {
+        window.addEventListener(evt, wakeUI, { passive: true });
+      });
+
+      /* --------------------------------------------------------------------------
+         10. KEYBOARD SHORTCUTS
+         -------------------------------------------------------------------------- */
+      window.addEventListener('keydown', (e) => {
+        if (linksModal.classList.contains('open')) {
+          if (e.key === 'Escape') closeModal();
+          return;
+        }
+
+        switch (e.key) {
+          case 'ArrowRight':
+          case ' ':
+            e.preventDefault();
+            if (e.key === ' ') {
+              toggleAutoPlay();
+            } else {
+              nextPhoto();
+            }
+            break;
+          case 'ArrowLeft':
+            e.preventDefault();
+            prevPhoto();
+            break;
+          case 'r':
+          case 'R':
+            toggleRandomOrder();
+            break;
+          case 's':
+          case 'S':
+            applyRandomOrder(true);
+            showToast('🔀 Re-Shuffled photos in random order!');
+            break;
+          case 'f':
+          case 'F':
+            toggleFullscreen();
+            break;
+          case 'm':
+          case 'M':
+            openModal();
+            break;
+        }
+      });
+
+      /* --------------------------------------------------------------------------
+         11. THUMBNAIL RIBBON
+         -------------------------------------------------------------------------- */
+      function renderThumbStrip() {
+        thumbStrip.innerHTML = '';
+        photoList.forEach((url, i) => {
+          const img = document.createElement('img');
+          img.className = 'thumb-item' + (i === currentIndex ? ' active' : '');
+          img.src = url;
+          img.alt = `Thumbnail ${i + 1}`;
+          img.onclick = () => showPhoto(i, i > currentIndex ? 'next' : 'prev');
+          thumbStrip.appendChild(img);
+        });
+      }
+
+      function updateThumbStripActive() {
+        const thumbs = thumbStrip.querySelectorAll('.thumb-item');
+        thumbs.forEach((th, i) => {
+          th.classList.toggle('active', i === currentIndex);
+          if (i === currentIndex) {
+            th.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+          }
+        });
+      }
+
+      /* --------------------------------------------------------------------------
+         12. MODAL & QUEUE MANAGEMENT
+         -------------------------------------------------------------------------- */
+      function openModal() {
+        container.classList.remove('idle-hide');
+        renderQueueList();
+        linksModal.classList.add('open');
+      }
+
+      function closeModal() {
+        linksModal.classList.remove('open');
+        wakeUI();
+      }
+
+      function renderQueueList() {
+        queueCount.textContent = `${masterPhotoList.length} photo${masterPhotoList.length === 1 ? '' : 's'}`;
+        queueList.innerHTML = '';
+
+        if (masterPhotoList.length === 0) {
+          queueList.innerHTML = '<div style="color:var(--text-sub); text-align:center; padding:12px;">Queue is currently empty.</div>';
+          return;
+        }
+
+        masterPhotoList.forEach((url, idx) => {
+          const row = document.createElement('div');
+          row.className = 'photo-row-item';
+
+          const left = document.createElement('div');
+          left.className = 'photo-row-left';
+
+          const img = document.createElement('img');
+          img.className = 'photo-row-thumb';
+          img.src = url;
+          img.alt = 'Thumb';
+
+          const span = document.createElement('span');
+          span.className = 'photo-row-url';
+          span.textContent = `${idx + 1}. ${url}`;
+
+          left.appendChild(img);
+          left.appendChild(span);
+
+          const delBtn = document.createElement('button');
+          delBtn.className = 'delete-item-btn';
+          delBtn.innerHTML = '&times;';
+          delBtn.title = 'Remove photo';
+          delBtn.onclick = () => {
+            masterPhotoList.splice(idx, 1);
+            applyRandomOrder();
+            renderQueueList();
+            showPhoto(currentIndex);
+          };
+
+          row.appendChild(left);
+          row.appendChild(delBtn);
+          queueList.appendChild(row);
+        });
+      }
+
+      function importFromInput() {
+        const text = urlInput.value;
+        const newUrls = parseBulkInput(text);
+
+        if (newUrls.length === 0) {
+          showToast('No new image URLs found');
+          return;
+        }
+
+        let addedCount = 0;
+        newUrls.forEach(url => {
+          if (!masterPhotoList.includes(url)) {
+            masterPhotoList.push(url);
+            addedCount++;
+          }
+        });
+
+        applyRandomOrder();
+        closeModal();
+        urlInput.value = '';
+        showToast(`Added ${addedCount} photo(s) in random order!`);
+        showPhoto(0);
+      }
+
+      // Fetch Google Drive Folder Handler
+      async function handleFolderImport() {
+        const inputVal = folderUrlInput.value.trim();
+        const apiKey = apiKeyInput.value.trim();
+
+        if (!inputVal) {
+          showToast('Please enter a Google Drive folder URL or ID');
+          return;
+        }
+
+        const folderId = extractFolderId(inputVal);
+        if (!folderId) {
+          showToast('Invalid Google Drive folder link');
+          return;
+        }
+
+        // Show loading state
+        fetchBtnSpinner.classList.add('show');
+        fetchBtnText.textContent = 'Searching...';
+        fetchFolderBtn.disabled = true;
+
+        showToast('Connecting to Google Drive folder...');
+
+        try {
+          const foundImages = await fetchImagesFromGoogleDriveFolder(folderId, apiKey);
+
+          if (foundImages.length > 0) {
+            let addedCount = 0;
+            foundImages.forEach(url => {
+              if (!masterPhotoList.includes(url)) {
+                masterPhotoList.push(url);
+                addedCount++;
+              }
+            });
+
+            applyRandomOrder();
+            renderQueueList();
+            closeModal();
+            showToast(`Loaded ${foundImages.length} photos from Google Drive in random order!`);
+            showPhoto(0);
+          } else {
+            showToast('No public images found in folder. Check sharing permissions or paste file links.');
+          }
+        } catch (err) {
+          showToast('Could not access folder. Check permissions or paste individual file links.');
+        } finally {
+          fetchBtnSpinner.classList.remove('show');
+          fetchBtnText.textContent = 'Load Folder';
+          fetchFolderBtn.disabled = false;
+        }
+      }
+
+      /* --------------------------------------------------------------------------
+         13. TOAST NOTIFICATIONS
+         -------------------------------------------------------------------------- */
+      let toastTimeout = null;
+      function showToast(msg) {
+        toastMsg.textContent = msg;
+        toast.classList.add('show');
+        clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => {
+          toast.classList.remove('show');
+        }, 2800);
+      }
+
+      /* --------------------------------------------------------------------------
+         14. EVENT LISTENERS
+         -------------------------------------------------------------------------- */
+      playPauseBtn.addEventListener('click', toggleAutoPlay);
+      prevBtn.addEventListener('click', prevPhoto);
+      nextBtn.addEventListener('click', nextPhoto);
+      prevArrow.addEventListener('click', prevPhoto);
+      nextArrow.addEventListener('click', nextPhoto);
+
+      // Random Order Toggles
+      randomStatusBadge.addEventListener('click', toggleRandomOrder);
+      deckShuffleBtn.addEventListener('click', toggleRandomOrder);
+      reShuffleBtn.addEventListener('click', () => {
+        applyRandomOrder(true);
+        showToast('🔀 Shuffled photos into new random order!');
+      });
+
+      timerSelect.addEventListener('change', (e) => {
+        slideInterval = parseInt(e.target.value, 10);
+        showToast(`Timer set to ${slideInterval / 1000} seconds`);
+        if (isPlaying) {
+          resetAutoPlayProgress();
+        }
+      });
+
+      fullscreenBtn.addEventListener('click', toggleFullscreen);
+
+      fitModeBtn.addEventListener('click', () => {
+        isCoverMode = !isCoverMode;
+        container.classList.toggle('cover-mode', isCoverMode);
+        showToast(isCoverMode ? 'Display Mode: Fill Screen (Crop)' : 'Display Mode: Fit Full Image');
+      });
+
+      openModalBtn.addEventListener('click', openModal);
+      closeModalBtn.addEventListener('click', closeModal);
+      cancelModalBtn.addEventListener('click', closeModal);
+      importUrlsBtn.addEventListener('click', importFromInput);
+      fetchFolderBtn.addEventListener('click', handleFolderImport);
+
+      clearAllBtn.addEventListener('click', () => {
+        if (confirm('Clear all photos from the queue?')) {
+          masterPhotoList = [];
+          photoList = [];
+          currentIndex = 0;
+          renderQueueList();
+          renderThumbStrip();
+          showPhoto(0);
+          showToast('Queue cleared');
+        }
+      });
+
+      // Modal Tabs Navigation
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+
+          btn.classList.add('active');
+          const panelId = btn.getAttribute('data-tab');
+          const panel = document.getElementById(panelId);
+          if (panel) panel.classList.add('active');
+        });
+      });
+
+      // Presets
+      document.querySelectorAll('.preset-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const presetKey = chip.getAttribute('data-preset');
+          if (PRESETS[presetKey]) {
+            masterPhotoList = [...PRESETS[presetKey]];
+            applyRandomOrder();
+            renderQueueList();
+            renderThumbStrip();
+            showPhoto(0);
+            closeModal();
+            showToast(`Loaded ${chip.textContent.trim()} in random order!`);
+          }
+        });
+      });
+
+      /* --------------------------------------------------------------------------
+         INITIALIZATION
+         -------------------------------------------------------------------------- */
+      applyRandomOrder();
+      renderThumbStrip();
+      showPhoto(0);
+      startAutoPlay();
+      wakeUI();
+
+    })();
+  </script>
+</body>
+</html>
